@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: electrical-symbol-inspector-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: electrical-symbol-db
+          property: connectionString
+      - key: ALLOWED_ORIGINS
+        sync: false  # Vercel の URL を手動で設定
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: COMPANY_NAME
+        value: 株式会社サンプル電気工事
+      - key: DEFAULT_TAX_RATE
+        value: "0.10"
+      - key: DEFAULT_MISC_RATE
+        value: "0.15"
+
+databases:
+  - name: electrical-symbol-db
+    plan: free
+    databaseName: electrical_symbol_db
+    user: esdb_user
