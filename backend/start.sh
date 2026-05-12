@@ -1,12 +1,20 @@
 #!/bin/sh
-set -e
 
 echo "=== Starting electrical-symbol-inspector API ==="
-echo "DATABASE_URL is set: $([ -n "$DATABASE_URL" ] && echo yes || echo no)"
+echo "Python version: $(python --version)"
+echo "DATABASE_URL set: $([ -n "$DATABASE_URL" ] && echo YES || echo NO)"
+echo "PORT: ${PORT:-8000}"
 
-echo "Running database migrations..."
+echo ""
+echo "--- Running database migrations ---"
 alembic upgrade head
-echo "Migrations completed."
+MIGRATION_EXIT=$?
+if [ $MIGRATION_EXIT -ne 0 ]; then
+    echo "WARNING: Migration failed with exit code $MIGRATION_EXIT"
+    echo "Continuing startup anyway..."
+fi
 
-echo "Starting application..."
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+echo ""
+echo "--- Starting uvicorn ---"
+PORT="${PORT:-8000}"
+exec uvicorn app.main:app --host 0.0.0.0 --port "$PORT"
