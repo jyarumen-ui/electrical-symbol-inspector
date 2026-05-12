@@ -7,29 +7,24 @@ from fastapi.middleware.cors import CORSMiddleware
 from .routers import jobs_router, estimation_router, master_items_router, symbol_hits_router, drawings_router
 from .config import settings
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 def run_migrations():
     """Run alembic migrations synchronously on startup."""
     try:
-        import os
         from alembic.config import Config
         from alembic import command
 
         alembic_cfg = Config("alembic.ini")
-        # Override the sqlalchemy.url with the production URL
-        db_url = settings.async_database_url
-        # Convert asyncpg URL to psycopg2 for alembic
-        sync_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
-        alembic_cfg.set_main_option("sqlalchemy.url", sync_url)
+        alembic_cfg.set_main_option("sqlalchemy.url", settings.sync_database_url)
 
-        logger.info("Running database migrations...")
+        logger.info(f"Running migrations with URL: {settings.sync_database_url[:40]}...")
         command.upgrade(alembic_cfg, "head")
-        logger.info("Database migrations completed successfully.")
+        logger.info("Migrations completed successfully.")
     except Exception as e:
-        logger.error(f"Migration failed: {e}")
-        logger.warning("Continuing startup despite migration failure...")
+        logger.error(f"Migration error: {e}", exc_info=True)
 
 
 @asynccontextmanager
