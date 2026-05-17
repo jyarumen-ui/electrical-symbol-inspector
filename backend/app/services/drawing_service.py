@@ -11,8 +11,12 @@ import re
 import uuid
 from typing import Any
 
+import logging
+
 import anthropic
 from PIL import Image
+
+logger = logging.getLogger(__name__)
 
 SYMBOL_DETECTION_PROMPT = """
 あなたは電気設備の図面（平面図・配線図）を解析する専門エキスパートです。
@@ -148,6 +152,13 @@ def _call_claude_vision(
                 ],
             }
         ],
+    )
+
+    usage = message.usage
+    logger.info(
+        f"Claude API usage | page={page_num} "
+        f"input_tokens={usage.input_tokens} output_tokens={usage.output_tokens} "
+        f"est_cost_usd={usage.input_tokens * 0.000015 + usage.output_tokens * 0.000075:.4f}"
     )
 
     # テキストブロックからJSONを抽出

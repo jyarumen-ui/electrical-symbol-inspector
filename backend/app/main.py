@@ -4,10 +4,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import jobs_router, estimation_router, master_items_router, symbol_hits_router, drawings_router
+from .routers import jobs_router, estimation_router, master_items_router, symbol_hits_router, drawings_router, admin_router
 from .config import settings
 from .database import AsyncSessionLocal
 from .services.alert_service import check_and_log_expiring_items
+from .services.archive_service import archive_old_jobs
 from .services.seed_service import seed_if_empty
 
 logging.basicConfig(level=logging.INFO)
@@ -36,6 +37,7 @@ async def lifespan(app: FastAPI):
     async with AsyncSessionLocal() as db:
         await seed_if_empty(db)
         await check_and_log_expiring_items(db, settings.expiry_alert_days)
+        await archive_old_jobs(db)
     yield
 
 
@@ -59,6 +61,7 @@ app.include_router(estimation_router)
 app.include_router(master_items_router)
 app.include_router(symbol_hits_router)
 app.include_router(drawings_router)
+app.include_router(admin_router)
 
 
 @app.get("/health")

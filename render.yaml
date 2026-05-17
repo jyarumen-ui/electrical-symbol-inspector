@@ -23,6 +23,44 @@ services:
       - key: DEFAULT_MISC_RATE
         value: "0.15"
 
+  - type: cron
+    name: db-backup
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    schedule: "0 3 * * *"
+    command: >
+      sh -c 'pg_dump "$DATABASE_URL" | gzip | base64 > /tmp/backup.sql.gz.b64
+      && echo "[backup] $(date): $(wc -c < /tmp/backup.sql.gz.b64) bytes (base64)"'
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: electrical-symbol-db
+          property: connectionString
+
+  - type: cron
+    name: archive-old-jobs
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    schedule: "0 2 * * 0"
+    command: >
+      sh -c 'python -c "
+      import asyncio
+      from app.database import AsyncSessionLocal
+      from app.services.archive_service import archive_old_jobs
+      async def run():
+          async with AsyncSessionLocal() as db:
+              n = await archive_old_jobs(db)
+              print(f\"[archive] {n} jobs archived\")
+      asyncio.run(run())
+      "'
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: electrical-symbol-db
+          property: connectionString
+
 databases:
   - name: electrical-symbol-db
     plan: free
