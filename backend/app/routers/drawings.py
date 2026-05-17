@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import settings
 from ..database import get_db
 from ..models import Job, SymbolHit
 from ..services.drawing_service import (
@@ -83,12 +84,17 @@ async def upload_drawing(
     rows = symbols_to_symbol_hit_rows(symbols, job_id=job_id)
 
     hit_objects = [SymbolHit(**row) for row in rows]
+    auto_accepted = 0
     for obj in hit_objects:
+        if obj.ai_confidence >= settings.auto_accept_threshold:
+            obj.status = "ACCEPTED"
+            auto_accepted += 1
         db.add(obj)
     await db.commit()
 
     return {
         "detected": len(rows),
+        "auto_accepted": auto_accepted,
         "filename": file.filename,
-        "message": f"{len(rows)} 件の記号を検出しました",
+        "message": f"{len(rows)} 件の記号を検出しました（うち {auto_accepted} 件を自動承認）",
     }
