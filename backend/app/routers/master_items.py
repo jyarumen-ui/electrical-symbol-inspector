@@ -3,9 +3,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import settings
 from ..database import get_db
 from ..models import MasterItem, MasterItemHistory
 from ..schemas import MasterItemCreate, MasterItemRead, MasterItemUpdate, MasterItemHistoryRead
+from ..services.alert_service import get_expiring_master_items
 
 router = APIRouter(prefix="/master-items", tags=["master-items"])
 
@@ -32,6 +34,16 @@ async def create_master_item(body: MasterItemCreate, db: AsyncSession = Depends(
     await db.commit()
     await db.refresh(item)
     return item
+
+
+@router.get("/expiring", response_model=list[MasterItemRead])
+async def list_expiring_master_items(
+    days: int = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """valid_until が days 日以内（デフォルト: expiry_alert_days 設定値）に切れる単価マスターを返す。"""
+    days_ahead = days if days is not None else settings.expiry_alert_days
+    return await get_expiring_master_items(db, days_ahead)
 
 
 @router.get("/{item_id}", response_model=MasterItemRead)

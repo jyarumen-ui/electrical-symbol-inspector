@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .routers import jobs_router, estimation_router, master_items_router, symbol_hits_router, drawings_router
 from .config import settings
+from .database import AsyncSessionLocal
+from .services.alert_service import check_and_log_expiring_items
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,6 +32,8 @@ def run_migrations():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     run_migrations()
+    async with AsyncSessionLocal() as db:
+        await check_and_log_expiring_items(db, settings.expiry_alert_days)
     yield
 
 
