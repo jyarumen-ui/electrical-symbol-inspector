@@ -3,12 +3,16 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  base: process.env.NODE_ENV === "production" ? "/electrical-symbol-inspector/" : "/",
   server: {
     port: 5173,
     proxy: {
       "/api": {
-        target: "http://localhost:8000",
+        target: process.env.BACKEND_URL || "http://localhost:8000",
+        changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
+        proxyTimeout: 300000,
+        timeout: 300000,
       },
     },
   },

@@ -30,8 +30,9 @@ function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  const basename = import.meta.env.PROD ? "/electrical-symbol-inspector" : "/";
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={basename}>
       <Layout>
         <Routes>
           <Route path="/" element={<DashboardPage />} />

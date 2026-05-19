@@ -7,7 +7,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from .routers import jobs_router, estimation_router, master_items_router, symbol_hits_router, drawings_router
 from .config import settings
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    force=True,
+)
 logger = logging.getLogger(__name__)
 
 
@@ -38,6 +42,7 @@ app = FastAPI(
     description="電気記号判定・見積管理システム",
     version="1.0.0",
     lifespan=lifespan,
+    debug=False,
 )
 
 app.add_middleware(

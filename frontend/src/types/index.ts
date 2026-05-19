@@ -93,6 +93,31 @@ export interface MasterItem {
   updated_at: string;
 }
 
+export interface UncertainMark {
+  id: string;
+  symbol_code: string;
+  x: number;
+  y: number;
+  reason: string;
+}
+
+export interface LocatedSymbol {
+  symbol_code: string;
+  x: number;
+  y: number;
+}
+
+export interface UploadResult {
+  detected: number;
+  filename: string;
+  message: string;
+  page_image: string | null;
+  img_width: number;
+  img_height: number;
+  uncertain: UncertainMark[];
+  located_symbols: LocatedSymbol[];
+}
+
 export interface RevisionDiff {
   added: Array<{ id: string; symbol_code: string }>;
   removed: Array<{ id: string; symbol_code: string }>;

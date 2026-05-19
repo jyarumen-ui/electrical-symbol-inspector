@@ -1,6 +1,6 @@
 import type { EstimationSummary } from "../../types";
 
-const fmt = (n: number) => n.toLocaleString("ja-JP", { maximumFractionDigits: 0 });
+const fmt = (n: number | string) => Math.round(Number(n)).toLocaleString("ja-JP");
 
 export function EstimationTotals({ summary }: { summary: EstimationSummary }) {
   return (
@@ -11,11 +11,11 @@ export function EstimationTotals({ summary }: { summary: EstimationSummary }) {
           <span className="font-mono">¥{fmt(summary.subtotal)}</span>
         </div>
         <div className="flex justify-between px-4 py-2 bg-gray-50 border-b">
-          <span>諸経費（{Math.round(summary.confirmed_items[0]?.misc_rate * 100 ?? 15)}%）</span>
+          <span>諸経費（{Math.round((summary.confirmed_items[0]?.misc_rate ?? 0.15) * 100)}%）</span>
           <span className="font-mono">¥{fmt(summary.misc_fee)}</span>
         </div>
         <div className="flex justify-between px-4 py-2 bg-gray-50 border-b">
-          <span>消費税（{Math.round(summary.confirmed_items[0]?.tax_rate * 100 ?? 10)}%）</span>
+          <span>消費税（{Math.round((summary.confirmed_items[0]?.tax_rate ?? 0.10) * 100)}%）</span>
           <span className="font-mono">¥{fmt(summary.tax)}</span>
         </div>
         <div className="flex justify-between px-4 py-3 bg-primary text-white font-bold">

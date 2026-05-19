@@ -3,10 +3,10 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { Upload, FileText, Image, AlertTriangle, CheckCircle, Loader2, X } from "lucide-react";
 import { uploadDrawing } from "../../services/api";
+import type { UploadResult } from "../../types";
+import { DiagramViewer } from "./DiagramViewer";
 
-interface Props {
-  jobId: string;
-}
+interface Props { jobId: string }
 
 const ACCEPTED = ".pdf,.png,.jpg,.jpeg,.xlsx,.xls";
 const ACCEPTED_TYPES = new Set([
@@ -28,7 +28,7 @@ export function DrawingUploadPanel({ jobId }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [result, setResult] = useState<{ detected: number; filename: string } | null>(null);
+  const [result, setResult] = useState<UploadResult | null>(null);
 
   const uploadMut = useMutation({
     mutationFn: (file: File) => uploadDrawing(jobId, file),
@@ -37,8 +37,10 @@ export function DrawingUploadPanel({ jobId }: Props) {
       toast.success(data.message);
       qc.invalidateQueries({ queryKey: ["symbol-hits", jobId] });
     },
-    onError: (err: Error) => {
-      toast.error(err.message || "アップロードに失敗しました", { duration: 8000 });
+    onError: (err: unknown) => {
+      const e = err as { response?: { data?: { detail?: string }; status?: number }; message?: string };
+      const msg = e?.response?.data?.detail ?? e?.message ?? "アップロードに失敗しました";
+      toast.error(`[${e?.response?.status ?? "ERR"}] ${msg}`, { duration: 12000 });
     },
   });
 
@@ -68,15 +70,7 @@ export function DrawingUploadPanel({ jobId }: Props) {
     if (file) handleFile(file);
   };
 
-  const onDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(true);
-  };
-
-  const reset = () => {
-    setSelectedFile(null);
-    setResult(null);
-  };
+  const reset = () => { setSelectedFile(null); setResult(null); };
 
   return (
     <div className="space-y-5">
@@ -87,26 +81,17 @@ export function DrawingUploadPanel({ jobId }: Props) {
         </p>
       </div>
 
-      {/* Drop zone */}
+      {/* ドロップゾーン */}
       <div
         className={`border-2 border-dashed rounded-xl p-10 text-center transition-colors cursor-pointer ${
-          dragOver
-            ? "border-primary bg-primary/5"
-            : "border-gray-300 hover:border-primary/50 hover:bg-gray-50"
+          dragOver ? "border-primary bg-primary/5" : "border-gray-300 hover:border-primary/50 hover:bg-gray-50"
         }`}
         onDrop={onDrop}
-        onDragOver={onDragOver}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onClick={() => !selectedFile && inputRef.current?.click()}
       >
-        <input
-          ref={inputRef}
-          type="file"
-          accept={ACCEPTED}
-          className="hidden"
-          onChange={onInputChange}
-        />
-
+        <input ref={inputRef} type="file" accept={ACCEPTED} className="hidden" onChange={onInputChange} />
         {!selectedFile ? (
           <div className="flex flex-col items-center gap-3 text-gray-400">
             <Upload size={40} className="opacity-50" />
@@ -132,7 +117,7 @@ export function DrawingUploadPanel({ jobId }: Props) {
         )}
       </div>
 
-      {/* Upload button */}
+      {/* アップロードボタン */}
       {selectedFile && !result && (
         <div className="flex justify-end">
           <button
@@ -141,53 +126,60 @@ export function DrawingUploadPanel({ jobId }: Props) {
             disabled={uploadMut.isPending}
           >
             {uploadMut.isPending ? (
-              <>
-                <Loader2 size={15} className="animate-spin" />
-                解析中...（しばらくお待ちください）
-              </>
+              <><Loader2 size={15} className="animate-spin" />解析中...（しばらくお待ちください）</>
             ) : (
-              <>
-                <Upload size={15} />
-                記号を検出する
-              </>
+              <><Upload size={15} />記号を検出する</>
             )}
           </button>
         </div>
       )}
 
-      {/* Result */}
+      {/* 結果 */}
       {result && (
-        <div className="p-4 bg-green-50 border border-green-200 rounded-xl flex items-start gap-3">
-          <CheckCircle size={20} className="text-green-500 shrink-0 mt-0.5" />
-          <div>
-            <p className="font-semibold text-green-800">
-              {result.detected} 件の電気記号を検出しました
-            </p>
-            <p className="text-sm text-green-700 mt-0.5">
-              「記号判定」タブで内容を確認・承認してから見積を生成してください。
-            </p>
-            <button className="mt-2 text-xs text-green-600 underline" onClick={reset}>
-              別のファイルをアップロード
-            </button>
+        <div className="space-y-3">
+          <div className="p-4 bg-green-50 border border-green-200 rounded-xl flex items-start gap-3">
+            <CheckCircle size={20} className="text-green-500 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-green-800">{result.detected} 件の電気記号を検出しました</p>
+              <p className="text-sm text-green-700 mt-0.5">「見積明細」タブで「見積を生成」を押してください。</p>
+              <button className="mt-2 text-xs text-green-600 underline" onClick={reset}>
+                別のファイルをアップロード
+              </button>
+            </div>
           </div>
+
+          {/* インタラクティブ図面ビューア */}
+          {result.page_image && (
+            <div className="border border-gray-200 rounded-xl overflow-hidden">
+              <div className="bg-gray-50 px-4 py-2.5 text-sm font-medium text-gray-700 flex items-center gap-2 border-b border-gray-200">
+                <AlertTriangle size={14} className="text-orange-500" />
+                図面確認・手動微調整
+                <span className="ml-auto text-xs text-gray-400 font-normal">
+                  色付き番号 = 検出記号 | 赤点線 = AI不確定（クリックで除去） | クリック = 手動追加
+                </span>
+              </div>
+              <div className="p-3">
+                <DiagramViewer
+                  jobId={jobId}
+                  pageImage={result.page_image}
+                  imgWidth={result.img_width}
+                  imgHeight={result.img_height}
+                  initialUncertain={result.uncertain}
+                  detectedSymbols={result.located_symbols ?? []}
+                  onSymbolAdded={() => qc.invalidateQueries({ queryKey: ["symbol-hits", jobId] })}
+                />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Notes */}
-      <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex gap-2">
+      {/* 注意事項 */}
+      <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800 flex gap-2">
         <AlertTriangle size={14} className="shrink-0 mt-0.5" />
         <div className="space-y-1">
-          <p>
-            <strong>環境変数が必要です。</strong>{" "}
-            バックエンドの <code className="bg-amber-100 px-1 rounded">.env</code> に{" "}
-            <code className="bg-amber-100 px-1 rounded">ANTHROPIC_API_KEY</code> を設定してください。
-          </p>
-          <p>
-            PDF は各ページを画像変換して解析します。ページ数が多い場合は時間がかかります。
-          </p>
-          <p>
-            Excel は埋め込み図面画像を抽出して解析します。テキストのみの Excel には対応していません。
-          </p>
+          <p>PDF は各ページを画像変換して解析します。ページ数が多い場合は時間がかかります。</p>
+          <p>Excel は埋め込み図面画像を抽出して解析します。テキストのみの Excel には対応していません。</p>
         </div>
       </div>
     </div>

@@ -74,13 +74,6 @@ function UsageGuide() {
               </div>
             </div>
           ))}
-          <div className="sm:col-span-2 mt-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex gap-2">
-            <AlertTriangle size={14} className="shrink-0 mt-0.5" />
-            <span>
-              <strong>バックエンドが必要です。</strong> 見積生成・保存には FastAPI サーバーの起動が必要です。<br />
-              <code className="bg-amber-100 px-1 rounded">cd backend &amp;&amp; uvicorn app.main:app --reload</code> を実行してください。
-            </span>
-          </div>
         </div>
       )}
     </div>

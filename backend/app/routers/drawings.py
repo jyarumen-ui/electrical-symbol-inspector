@@ -1,8 +1,13 @@
 """図面アップロード・記号検出エンドポイント"""
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
+
+import anthropic
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
@@ -37,10 +42,6 @@ async def upload_drawing(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """
-    図面ファイル（PDF / PNG / JPEG / Excel）をアップロードし、
-    Claude Vision で電気記号を検出して SymbolHit を一括登録する。
-    """
     result = await db.execute(select(Job).where(Job.id == job_id))
     job = result.scalar_one_or_none()
     if not job:
@@ -61,29 +62,45 @@ async def upload_drawing(
         )
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
+    logger.info("Upload start: %s (%s) size=%d", file.filename, content_type, len(file_bytes))
+
+    page_image: str | None = None
+    uncertain: list[dict[str, Any]] = []
+    located_symbols: list[dict[str, Any]] = []
+    img_width = 0
+    img_height = 0
 
     try:
         if content_type == "application/pdf":
-            symbols = detect_symbols_from_pdf(file_bytes, api_key)
+            symbols, page_image, uncertain, located_symbols, img_width, img_height = \
+                detect_symbols_from_pdf(file_bytes, api_key)
         elif content_type in (
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             "application/vnd.ms-excel",
         ):
-            symbols = detect_symbols_from_excel(file_bytes, api_key)
+            symbols, page_image, uncertain, located_symbols, img_width, img_height = \
+                detect_symbols_from_excel(file_bytes, api_key)
         else:
-            symbols = detect_symbols_from_image(file_bytes, content_type, api_key)
+            symbols, page_image, uncertain, located_symbols, img_width, img_height = \
+                detect_symbols_from_image(file_bytes, content_type, api_key)
     except RuntimeError as e:
+        logger.error("RuntimeError: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+    except anthropic.RateLimitError as e:
+        logger.error("RateLimitError: %s", e)
+        raise HTTPException(status_code=429, detail="AI APIのレートリミットに達しました。しばらく待ってから再試行してください。")
+    except anthropic.BadRequestError as e:
+        logger.error("BadRequestError: %s", e)
+        raise HTTPException(status_code=422, detail=f"画像処理エラー: {e}")
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"記号検出中にエラーが発生しました: {str(e)}",
-        )
+        msg = str(e)
+        logger.error("Upload error type=%s msg=%s", type(e).__name__, msg, exc_info=True)
+        if "429" in msg or "rate_limit" in msg.lower():
+            raise HTTPException(status_code=429, detail="AI APIのレートリミットに達しました。しばらく待ってから再試行してください。")
+        raise HTTPException(status_code=500, detail=f"記号検出エラー: {msg}")
 
     rows = symbols_to_symbol_hit_rows(symbols, job_id=job_id)
-
-    hit_objects = [SymbolHit(**row) for row in rows]
-    for obj in hit_objects:
+    for obj in [SymbolHit(**row) for row in rows]:
         db.add(obj)
     await db.commit()
 
@@ -91,4 +108,9 @@ async def upload_drawing(
         "detected": len(rows),
         "filename": file.filename,
         "message": f"{len(rows)} 件の記号を検出しました",
+        "page_image": page_image,
+        "img_width": img_width,
+        "img_height": img_height,
+        "uncertain": uncertain,
+        "located_symbols": located_symbols,
     }

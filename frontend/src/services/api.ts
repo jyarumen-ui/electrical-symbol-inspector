@@ -1,18 +1,21 @@
 import axios from "axios";
 import type {
   Job, JobRevision, SymbolHit, EstimationItem, EstimationSummary,
-  MasterItem, RevisionDiff,
+  MasterItem, RevisionDiff, UploadResult,
 } from "../types";
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api` : "/api",
+  baseURL: import.meta.env.VITE_API_URL ?? "/api",
 });
 
 api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (!err.response) {
-      err.message = "バックエンドサーバーに接続できません。\n`uvicorn app.main:app --reload` で起動してください。";
+      err.message = "バックエンドサーバーに接続できません。";
+    } else {
+      const detail = err.response.data?.detail;
+      if (detail) err.message = detail;
     }
     return Promise.reject(err);
   }
@@ -71,9 +74,8 @@ export const getSettings = () =>
 export const uploadDrawing = (jobId: string, file: File) => {
   const form = new FormData();
   form.append("file", file);
-  return api.post<{ detected: number; filename: string; message: string }>(
+  return api.post<UploadResult>(
     `/jobs/${jobId}/drawings/upload`,
-    form,
-    { headers: { "Content-Type": "multipart/form-data" } }
+    form
   ).then(r => r.data);
 };

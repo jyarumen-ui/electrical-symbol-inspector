@@ -6,7 +6,7 @@ import type { EstimationItem } from "../../types";
 import { updateEstimationItem } from "../../services/api";
 import { StatusBadge } from "../ui/StatusBadge";
 
-const fmt = (n: number) => n.toLocaleString("ja-JP", { maximumFractionDigits: 0 });
+const fmt = (n: number | string) => Math.round(Number(n)).toLocaleString("ja-JP");
 
 interface Props {
   items: EstimationItem[];
@@ -78,7 +78,7 @@ export function EstimationTable({ items, jobId }: Props) {
                       onChange={(e) => setEditValues((v) => ({ ...v, quantity: +e.target.value }))}
                     />
                   ) : (
-                    item.quantity
+                    Math.round(Number(item.quantity))
                   )}
                 </td>
                 <td>{item.unit}</td>

@@ -1,13 +1,14 @@
 import uuid
 from datetime import datetime
-from decimal import Decimal
+from typing import Any
 from pydantic import BaseModel
 
 
 class AiCandidate(BaseModel):
-    symbolCode: str
-    label: str
-    confidence: float
+    symbolCode: str = ""
+    label: str = ""
+    confidence: float = 0.5
+    model_config = {"extra": "ignore"}
 
 
 class SymbolHitCreate(BaseModel):
@@ -16,7 +17,7 @@ class SymbolHitCreate(BaseModel):
     symbol_code: str
     label: str | None = None
     ai_confidence: float | None = None
-    ai_candidates: list[AiCandidate] | None = None
+    ai_candidates: list[Any] | None = None
     x: float | None = None
     y: float | None = None
     width: float | None = None
@@ -32,7 +33,7 @@ class SymbolHitRead(BaseModel):
     symbol_code: str
     label: str | None
     ai_confidence: float | None
-    ai_candidates: list[AiCandidate] | None
+    ai_candidates: list[Any] | None  # DB格式に依存しないよう Any で受け取る
     x: float | None
     y: float | None
     width: float | None

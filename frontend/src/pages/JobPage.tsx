@@ -102,9 +102,13 @@ export function JobPage() {
 
       {/* Tab content */}
       <div className="mt-4">
-        {tab === "upload" && <DrawingUploadPanel jobId={jobId!} />}
-
-        {tab === "symbols" && <SymbolHitsPanel jobId={jobId!} />}
+        {/* upload/symbols は常時マウントして state を保持 */}
+        <div style={{ display: tab === "upload" ? "block" : "none" }}>
+          <DrawingUploadPanel jobId={jobId!} />
+        </div>
+        <div style={{ display: tab === "symbols" ? "block" : "none" }}>
+          <SymbolHitsPanel jobId={jobId!} />
+        </div>
 
         {tab === "estimation" && (
           summaryLoading ? <LoadingSpinner /> :

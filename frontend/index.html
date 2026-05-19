@@ -2,7 +2,13 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/electrical-symbol-inspector/favicon.svg" />
+    <script>
+      (function(){
+        var q=new URLSearchParams(location.search),r=q.get("r");
+        if(r){var u=decodeURIComponent(r)+(q.get("q")?"?"+decodeURIComponent(q.get("q")):"")+(q.get("h")?"#"+decodeURIComponent(q.get("h")):"");history.replaceState(null,"","/electrical-symbol-inspector"+u);}
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Electrical Symbol Inspector OS</title>
   </head>

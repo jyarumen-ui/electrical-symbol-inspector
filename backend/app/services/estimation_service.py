@@ -1,70 +1,61 @@
+from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import EstimationItem, SymbolHit, MasterItem, Job
 from ..schemas.estimation import EstimationSummary, GenerateEstimationResponse, EstimationItemRead
 
-# HOLD/UNASSIGNED → PENDING, ACCEPTED → CONFIRMED, REJECTED → skip
-_STATUS_MAP = {
-    "ACCEPTED": "CONFIRMED",
-    "HOLD": "PENDING",
-    "UNASSIGNED": "PENDING",
-    "REJECTED": None,
-}
+_SKIP_STATUSES = {"REJECTED"}
 
 
 async def generate_estimation(job_id: UUID, db: AsyncSession) -> GenerateEstimationResponse:
-    """Convert SymbolHits into EstimationItems using current MasterItem prices."""
+    """既存の見積明細を削除してから SymbolHit を symbol_code ごとに集計して再生成する。"""
     today = date.today()
 
-    # Load job for region_code
     job = await db.get(Job, job_id)
     if not job:
         raise ValueError(f"Job {job_id} not found")
 
-    # Load all symbol hits for job that are not already in estimation
-    existing_hit_ids = (
-        await db.execute(
-            select(EstimationItem.symbol_hit_id).where(EstimationItem.job_id == job_id)
-        )
-    ).scalars().all()
+    # 既存の見積明細を全削除（再生成）
+    await db.execute(delete(EstimationItem).where(EstimationItem.job_id == job_id))
+    await db.flush()
 
     hits_result = await db.execute(
-        select(SymbolHit).where(
-            SymbolHit.job_id == job_id,
-            SymbolHit.id.not_in(existing_hit_ids) if existing_hit_ids else True,
-        )
+        select(SymbolHit).where(SymbolHit.job_id == job_id)
     )
     hits = hits_result.scalars().all()
 
-    generated_items = []
+    # REJECTED を除いて symbol_code ごとに集計
+    groups: dict[str, list[SymbolHit]] = defaultdict(list)
     skipped = 0
-
     for hit in hits:
-        est_status = _STATUS_MAP.get(hit.status)
-        if est_status is None:
+        if hit.status in _SKIP_STATUSES:
             skipped += 1
             continue
+        groups[hit.symbol_code].append(hit)
 
-        # Find matching master item: symbol_code + region_code, valid at today
-        master = await _find_master_item(hit.symbol_code, job.region_code, today, db)
+    generated_items = []
+
+    for symbol_code, code_hits in groups.items():
+        quantity = Decimal(str(len(code_hits)))
+        representative = code_hits[0]
+
+        master = await _find_master_item(symbol_code, job.region_code, today, db)
         if master is None:
-            # Try DEFAULT region fallback
-            master = await _find_master_item(hit.symbol_code, "DEFAULT", today, db)
+            master = await _find_master_item(symbol_code, "DEFAULT", today, db)
 
         if master:
             unit_price = master.material_cost + master.labor_cost
-            quantity = Decimal("1.000")
             amount = quantity * unit_price
             item = EstimationItem(
                 job_id=job_id,
-                symbol_hit_id=hit.id,
+                symbol_hit_id=representative.id,
                 master_item_id=master.id,
-                symbol_code=hit.symbol_code,
+                symbol_code=symbol_code,
                 item_name=master.item_name,
                 maker=master.maker,
                 model_number=master.model_number,
@@ -72,21 +63,20 @@ async def generate_estimation(job_id: UUID, db: AsyncSession) -> GenerateEstimat
                 unit=master.unit,
                 unit_price=unit_price,
                 amount=amount,
-                status=est_status,
+                status="CONFIRMED",
             )
         else:
-            # No master data — create PENDING placeholder
             item = EstimationItem(
                 job_id=job_id,
-                symbol_hit_id=hit.id,
-                symbol_code=hit.symbol_code,
-                item_name=f"[未登録] {hit.symbol_code}",
-                quantity=Decimal("1.000"),
+                symbol_hit_id=representative.id,
+                symbol_code=symbol_code,
+                item_name=f"[未登録] {symbol_code}  {representative.label or ''}".strip(),
+                quantity=quantity,
                 unit="個",
                 unit_price=Decimal("0.00"),
                 amount=Decimal("0.00"),
                 status="PENDING",
-                note="単価マスター未登録",
+                note="単価マスター未登録 — 「単価マスター」ページで登録してください",
             )
 
         db.add(item)
@@ -113,10 +103,12 @@ async def get_estimation_summary(job_id: UUID, db: AsyncSession) -> EstimationSu
     pending = [i for i in all_items if i.status == "PENDING"]
     excluded_count = sum(1 for i in all_items if i.status == "EXCLUDED")
 
-    subtotal = sum(i.amount for i in confirmed)
-    # Use first item's rates as representative (or defaults)
-    misc_rate = confirmed[0].misc_rate if confirmed else Decimal("0.15")
-    tax_rate = confirmed[0].tax_rate if confirmed else Decimal("0.10")
+    # CONFIRMED + PENDING を合計対象とする（全検出済みを見積金額に反映）
+    billable = [i for i in all_items if i.status in ("CONFIRMED", "PENDING")]
+    subtotal = sum(i.amount for i in billable)
+    all_with_rate = confirmed or pending
+    misc_rate = all_with_rate[0].misc_rate if all_with_rate else Decimal("0.15")
+    tax_rate = all_with_rate[0].tax_rate if all_with_rate else Decimal("0.10")
     misc_fee = subtotal * misc_rate
     tax = (subtotal + misc_fee) * tax_rate
     grand_total = subtotal + misc_fee + tax
