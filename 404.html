@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Electrical Symbol Inspector OS</title>
+  <script>
+    var l = window.location;
+    var base = "/electrical-symbol-inspector";
+    var path = l.pathname.replace(base, "") || "/";
+    var search = l.search ? "?q=" + encodeURIComponent(l.search.slice(1)) : "";
+    var hash = l.hash ? "&h=" + encodeURIComponent(l.hash.slice(1)) : "";
+    l.replace(base + "/?r=" + encodeURIComponent(path) + search + hash);
+  </script>
+</head>
+<body></body>
+</html>
