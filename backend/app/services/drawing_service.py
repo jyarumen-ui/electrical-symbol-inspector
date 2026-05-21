@@ -212,13 +212,13 @@ def _parse_json(text: str) -> dict[str, Any]:
         return {}
 
 
-def _call(client: anthropic.Anthropic, img_bytes: bytes, prompt: str) -> dict[str, Any]:
+def _call(client: anthropic.Anthropic, img_bytes: bytes, prompt: str, max_tokens: int = 2048) -> dict[str, Any]:
     b64, mt = _to_api_image(img_bytes)
     for attempt in range(3):
         try:
             msg = client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=2048,
+                max_tokens=max_tokens,
                 temperature=0,
                 messages=[{
                     "role": "user",
@@ -263,43 +263,45 @@ def _locate_symbols(
 ) -> list[dict[str, Any]]:
     """
     検出済み記号の位置座標を全件取得する（表示・番号付けのため）。
-    display_bytes と同じ座標系で返す。
+    コンパクトな {"コード":[[x,y],...]} 形式を使いトークン消費を抑える。
     """
     if not merged_counts:
         return []
 
     expected = "\n".join(
-        f"- {code}（{LABELS.get(code, code)}）: {n}個"
+        f"- {code}: {n}個"
         for code, n in sorted(merged_counts.items())
     )
-    prompt = f"""この電気設備図面に以下の電気記号があります。
+    img_tmp = Image.open(io.BytesIO(display_bytes))
+    dw, dh = img_tmp.size
+    prompt = f"""この電気設備図面（画像サイズ: {dw}×{dh}ピクセル）に以下の電気記号があります。
 各記号の全インスタンスの中心座標を報告してください。
 
-## 検出済み記号（数量）
+## 検出済み記号
 {expected}
 
-## 出力（JSONのみ・説明文不要）
-{{"symbols":[
-  {{"symbol_code":"SW-1P","instances":[{{"x":120,"y":350}},{{"x":450,"y":200}}]}},
-  {{"symbol_code":"RCPT-2P","instances":[{{"x":300,"y":180}}]}}
-]}}
+## 出力（JSONのみ・説明文一切不要）
+記号コードをキー、座標リスト（[x,y]の配列）を値にするJSON:
+{{"SW-1P":[[120,350],[450,200]],"RCPT-2P":[[300,180]]}}
 
 ## 座標ルール
-- x, y: 画像の左上を(0,0)とするピクセル座標（記号の中心点）
-- 凡例・タイトル欄・説明図の記号は除く
-- 数量と一致するよう全インスタンスを報告する
+- x: 0〜{dw}（左端=0、右端={dw}）
+- y: 0〜{dh}（上端=0、下端={dh}）
+- 記号の中心点のピクセル座標
+- 凡例・タイトル欄の記号は除く
+- 数量分のすべてのインスタンスを含める
 """
-    r = _call(client, display_bytes, prompt)
+    r = _call(client, display_bytes, prompt, max_tokens=4096)
     located: list[dict[str, Any]] = []
-    for entry in r.get("symbols", []):
-        code = str(entry.get("symbol_code", "UNKNOWN"))
-        for inst in entry.get("instances", []):
+    for code, positions in r.items():
+        if not isinstance(positions, list):
+            continue
+        for pos in positions:
             try:
-                located.append({
-                    "symbol_code": code,
-                    "x": float(inst.get("x", 0)),
-                    "y": float(inst.get("y", 0)),
-                })
+                if isinstance(pos, (list, tuple)) and len(pos) >= 2:
+                    located.append({"symbol_code": str(code), "x": float(pos[0]), "y": float(pos[1])})
+                elif isinstance(pos, dict):
+                    located.append({"symbol_code": str(code), "x": float(pos.get("x", 0)), "y": float(pos.get("y", 0))})
             except (TypeError, ValueError):
                 pass
     logger.info("Locate: %d positions", len(located))

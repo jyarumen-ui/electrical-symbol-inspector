@@ -245,23 +245,29 @@ export function DiagramViewer({
               x={0} y={0} width={vw} height={vh}
             />
 
-            {/* 検出記号マーカー（色付き・同種ごとに連番） */}
+            {/* 検出記号マーカー（カラーリング＋右上バッジ、記号を隠さない） */}
             {showMarkers && numberedSymbols.map((sym, i) => {
               const color = codeColors[sym.symbol_code] ?? "#666";
+              const badgeR = Math.max(9, Math.round(R * 0.55));
+              const bx = sym.x + R * 0.68;
+              const by = sym.y - R * 0.68;
               return (
                 <g key={i} data-marker="detected">
+                  {/* 半透明カラーリング（記号の上に薄く色付け） */}
                   <circle
                     cx={sym.x} cy={sym.y} r={R}
-                    fill={`${color}30`}
+                    fill={`${color}22`}
                     stroke={color}
-                    strokeWidth={Math.max(1.5, R * 0.14)}
+                    strokeWidth={Math.max(2, R * 0.1)}
                   />
+                  {/* 番号バッジ（右上に配置して記号中心を隠さない） */}
+                  <circle cx={bx} cy={by} r={badgeR} fill={color} />
                   <text
-                    x={sym.x} y={sym.y + FS * 0.38}
+                    x={bx} y={by + badgeR * 0.42}
                     textAnchor="middle"
-                    fontSize={FS}
-                    fill={color}
-                    fontWeight="800"
+                    fontSize={badgeR * 1.25}
+                    fill="white"
+                    fontWeight="900"
                     style={{ userSelect: "none" }}
                   >
                     {sym.n}
