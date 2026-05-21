@@ -256,55 +256,82 @@ def _safe_counts(raw: dict[str, Any]) -> dict[str, int]:
 
 # ── 記号位置検出（Pass 4） ────────────────────────────────────────────────────────
 
+_LOCATE_COLS = 12
+_LOCATE_ROWS = 8
+
+
 def _locate_symbols(
     client: anthropic.Anthropic,
     display_bytes: bytes,
     merged_counts: dict[str, int],
 ) -> list[dict[str, Any]]:
     """
-    検出済み記号の位置座標を全件取得する（表示・番号付けのため）。
-    コンパクトな {"コード":[[x,y],...]} 形式を使いトークン消費を抑える。
+    グリッドセル方式で記号位置を推定。
+    画像を COLS×ROWS のマス目に分け「どのマスにあるか」を Claude に答えさせる。
+    直接ピクセル座標を聞くよりはるかに精度が高い。
     """
     if not merged_counts:
         return []
 
-    expected = "\n".join(
-        f"- {code}: {n}個"
-        for code, n in sorted(merged_counts.items())
-    )
     img_tmp = Image.open(io.BytesIO(display_bytes))
     dw, dh = img_tmp.size
-    prompt = f"""この電気設備図面（画像サイズ: {dw}×{dh}ピクセル）に以下の電気記号があります。
-各記号の全インスタンスの中心座標を報告してください。
+    cell_w = dw / _LOCATE_COLS
+    cell_h = dh / _LOCATE_ROWS
 
-## 検出済み記号
+    expected = "\n".join(
+        f"- {code}（{LABELS.get(code, code)}）: {n}個"
+        for code, n in sorted(merged_counts.items())
+    )
+
+    prompt = f"""この電気設備図面を横{_LOCATE_COLS}列×縦{_LOCATE_ROWS}行のグリッドに分割しました。
+列番号: 左から 1〜{_LOCATE_COLS}（左端=列1、右端=列{_LOCATE_COLS}）
+行番号: 上から 1〜{_LOCATE_ROWS}（上端=行1、下端=行{_LOCATE_ROWS}）
+
+以下の各電気記号が「どの列・どの行のマス」にあるかを答えてください。
+同じ記号が複数あれば全インスタンスを含めること。
+凡例・タイトル欄の記号は除く。
+
+## 記号リスト
 {expected}
 
-## 出力（JSONのみ・説明文一切不要）
-記号コードをキー、座標リスト（[x,y]の配列）を値にするJSON:
-{{"SW-1P":[[120,350],[450,200]],"RCPT-2P":[[300,180]]}}
-
-## 座標ルール
-- x: 0〜{dw}（左端=0、右端={dw}）
-- y: 0〜{dh}（上端=0、下端={dh}）
-- 記号の中心点のピクセル座標
-- 凡例・タイトル欄の記号は除く
-- 数量分のすべてのインスタンスを含める
+## 出力（JSONのみ・説明文不要）
+記号コードをキー、[列番号,行番号]のリストを値:
+{{"SW-1P":[[2,1],[5,3]],"RCPT-2P":[[7,4],[9,2]]}}
 """
-    r = _call(client, display_bytes, prompt, max_tokens=4096)
+
+    r = _call(client, display_bytes, prompt, max_tokens=2048)
     located: list[dict[str, Any]] = []
-    for code, positions in r.items():
-        if not isinstance(positions, list):
+
+    # 同セルに複数シンボルが集まった場合のオフセット管理
+    cell_counts: dict[tuple[int, int], int] = {}
+
+    for code, cells in r.items():
+        if not isinstance(cells, list):
             continue
-        for pos in positions:
+        for cell in cells:
             try:
-                if isinstance(pos, (list, tuple)) and len(pos) >= 2:
-                    located.append({"symbol_code": str(code), "x": float(pos[0]), "y": float(pos[1])})
-                elif isinstance(pos, dict):
-                    located.append({"symbol_code": str(code), "x": float(pos.get("x", 0)), "y": float(pos.get("y", 0))})
+                if isinstance(cell, (list, tuple)) and len(cell) >= 2:
+                    col = max(1.0, min(float(_LOCATE_COLS), float(cell[0])))
+                    row = max(1.0, min(float(_LOCATE_ROWS), float(cell[1])))
+                else:
+                    continue
             except (TypeError, ValueError):
-                pass
-    logger.info("Locate: %d positions", len(located))
+                continue
+
+            key = (round(col), round(row))
+            idx = cell_counts.get(key, 0)
+            cell_counts[key] = idx + 1
+
+            # セル中心 + 同セル内インデックスで少しずらす
+            base_x = (col - 0.5) * cell_w
+            base_y = (row - 0.5) * cell_h
+            offset = idx * (cell_w * 0.2)
+            x = base_x + (offset % cell_w) - cell_w * 0.1
+            y = base_y + (int(offset / cell_w) * cell_h * 0.2)
+
+            located.append({"symbol_code": str(code), "x": x, "y": y})
+
+    logger.info("Locate grid(%dx%d): %d positions", _LOCATE_COLS, _LOCATE_ROWS, len(located))
     return located
 
 
