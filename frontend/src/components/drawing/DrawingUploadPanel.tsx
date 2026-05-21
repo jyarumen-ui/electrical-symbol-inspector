@@ -6,7 +6,11 @@ import { uploadDrawing } from "../../services/api";
 import type { UploadResult } from "../../types";
 import { DiagramViewer } from "./DiagramViewer";
 
-interface Props { jobId: string }
+interface Props {
+  jobId: string;
+  uploadResult: UploadResult | null;
+  onUploadResult: (r: UploadResult | null) => void;
+}
 
 const ACCEPTED = ".pdf,.png,.jpg,.jpeg,.xlsx,.xls";
 const ACCEPTED_TYPES = new Set([
@@ -23,12 +27,11 @@ function fileIcon(file: File) {
   return <FileText size={18} className="text-green-600" />;
 }
 
-export function DrawingUploadPanel({ jobId }: Props) {
+export function DrawingUploadPanel({ jobId, uploadResult: result, onUploadResult: setResult }: Props) {
   const qc = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [result, setResult] = useState<UploadResult | null>(null);
 
   const uploadMut = useMutation({
     mutationFn: (file: File) => uploadDrawing(jobId, file),

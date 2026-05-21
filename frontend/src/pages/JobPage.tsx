@@ -12,6 +12,7 @@ import { SymbolHitsPanel } from "../components/estimation/SymbolHitsPanel";
 import { RevisionDiffView } from "../components/revision/RevisionDiffView";
 import { DrawingUploadPanel } from "../components/drawing/DrawingUploadPanel";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
+import type { UploadResult } from "../types";
 
 type Tab = "upload" | "symbols" | "estimation" | "materials" | "revisions";
 
@@ -27,6 +28,7 @@ export function JobPage() {
   const { jobId } = useParams<{ jobId: string }>();
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("upload");
+  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
 
   const { data: job, isLoading: jobLoading } = useQuery({
     queryKey: ["job", jobId],
@@ -104,7 +106,7 @@ export function JobPage() {
       <div className="mt-4">
         {/* upload/symbols は常時マウントして state を保持 */}
         <div style={{ display: tab === "upload" ? "block" : "none" }}>
-          <DrawingUploadPanel jobId={jobId!} />
+          <DrawingUploadPanel jobId={jobId!} uploadResult={uploadResult} onUploadResult={setUploadResult} />
         </div>
         <div style={{ display: tab === "symbols" ? "block" : "none" }}>
           <SymbolHitsPanel jobId={jobId!} />
