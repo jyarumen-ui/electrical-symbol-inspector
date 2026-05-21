@@ -1,11 +1,10 @@
 import { useRef, useState, useCallback, useMemo } from "react";
 import { useMutation } from "@tanstack/react-query";
 import toast from "react-hot-toast";
-import { X, Plus, Check, Eye, EyeOff } from "lucide-react";
+import { X, Plus, Check, Eye, EyeOff, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import type { UncertainMark, LocatedSymbol } from "../../types";
 import { createSymbolHit } from "../../services/api";
 
-// 記号ごとに割り当てるカラーパレット（20色）
 const PALETTE = [
   "#1d4ed8", "#dc2626", "#16a34a", "#d97706", "#7c3aed",
   "#0891b2", "#be185d", "#b45309", "#c2410c", "#4f46e5",
@@ -31,6 +30,7 @@ const LABELS: Record<string, string> = {
 const SYMBOL_CODES = Object.entries(LABELS).map(([code, label]) => ({ code, label }));
 
 interface PendingMark { id: string; svgX: number; svgY: number }
+interface HistoryEntry { symbols: LocatedSymbol[]; uncertain: UncertainMark[] }
 
 interface Props {
   jobId: string;
@@ -47,34 +47,56 @@ export function DiagramViewer({
   initialUncertain, detectedSymbols, onSymbolAdded,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const [symbols, setSymbols] = useState<LocatedSymbol[]>(detectedSymbols ?? []);
   const [uncertain, setUncertain] = useState<UncertainMark[]>(initialUncertain ?? []);
   const [pendingMark, setPendingMark] = useState<PendingMark | null>(null);
   const [selectedCode, setSelectedCode] = useState("SW-1P");
   const [showMarkers, setShowMarkers] = useState(true);
+  const [zoom, setZoom] = useState(1.0);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
 
-  const safeDetected = detectedSymbols ?? [];
+  // stale closure を避けるために ref で最新値を保持
+  const symbolsRef = useRef(symbols);
+  symbolsRef.current = symbols;
+  const uncertainRef = useRef(uncertain);
+  uncertainRef.current = uncertain;
 
-  // 記号コードごとに色を割り当て
+  const pushHistory = useCallback(() => {
+    setHistory(h => [...h, {
+      symbols: symbolsRef.current,
+      uncertain: uncertainRef.current,
+    }]);
+  }, []);
+
+  const undo = useCallback(() => {
+    setHistory(h => {
+      if (h.length === 0) { toast("これ以上戻れません"); return h; }
+      const last = h[h.length - 1];
+      setSymbols(last.symbols);
+      setUncertain(last.uncertain);
+      return h.slice(0, -1);
+    });
+  }, []);
+
   const codeColors = useMemo(() => {
-    const codes = [...new Set(safeDetected.map((s) => s.symbol_code))].sort();
+    const codes = [...new Set(symbols.map((s) => s.symbol_code))].sort();
     const map: Record<string, string> = {};
     codes.forEach((code, i) => { map[code] = PALETTE[i % PALETTE.length]; });
     return map;
-  }, [detectedSymbols]);
+  }, [symbols]);
 
-  // 記号コードごとに連番を付与
+  // 記号コードごとに連番を付与（同種記号に 1, 2, 3... と番号振り）
   const numberedSymbols = useMemo(() => {
     const counters: Record<string, number> = {};
-    return safeDetected.map((s) => {
+    return symbols.map((s) => {
       counters[s.symbol_code] = (counters[s.symbol_code] ?? 0) + 1;
       return { ...s, n: counters[s.symbol_code] };
     });
-  }, [detectedSymbols]);
+  }, [symbols]);
 
-  // 凡例データ
   const legend = useMemo(() => {
     const groups: Record<string, { label: string; color: string; count: number }> = {};
-    for (const s of safeDetected) {
+    for (const s of symbols) {
       if (!groups[s.symbol_code]) {
         groups[s.symbol_code] = {
           label: LABELS[s.symbol_code] ?? s.symbol_code,
@@ -85,7 +107,7 @@ export function DiagramViewer({
       groups[s.symbol_code].count++;
     }
     return Object.entries(groups).map(([code, v]) => ({ code, ...v }));
-  }, [detectedSymbols, codeColors]);
+  }, [symbols, codeColors]);
 
   const addMut = useMutation({
     mutationFn: (body: { jobId: string; symbolCode: string; x: number; y: number }) =>
@@ -97,7 +119,13 @@ export function DiagramViewer({
         y: body.y,
         status: "ACCEPTED",
       }),
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
+      // 追加した記号をローカル状態に即時反映
+      setSymbols(prev => [...prev, {
+        symbol_code: variables.symbolCode,
+        x: variables.x,
+        y: variables.y,
+      }]);
       toast.success("記号を追加しました");
       setPendingMark(null);
       onSymbolAdded?.();
@@ -113,8 +141,7 @@ export function DiagramViewer({
     pt.y = e.clientY;
     const ctm = svg.getScreenCTM();
     if (!ctm) return null;
-    const svgPt = pt.matrixTransform(ctm.inverse());
-    return { x: svgPt.x, y: svgPt.y };
+    return pt.matrixTransform(ctm.inverse());
   }, []);
 
   const onSvgClick = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
@@ -126,93 +153,151 @@ export function DiagramViewer({
 
   const vw = imgWidth || 1600;
   const vh = imgHeight || 900;
-  // 記号サイズに合わせた円半径（図面サイズに比例）
   const R = Math.max(10, Math.round(vw / 80));
   const FS = Math.max(9, Math.round(R * 0.85));
 
   return (
     <div className="space-y-2">
       {/* コントロールバー */}
-      <div className="flex items-center gap-4 px-1 text-xs text-gray-500 flex-wrap">
+      <div className="flex items-center gap-2 px-1 text-xs text-gray-500 flex-wrap">
         <button
           className="flex items-center gap-1.5 font-medium text-gray-700 hover:text-primary"
           onClick={() => setShowMarkers((v) => !v)}
         >
           {showMarkers ? <Eye size={14} /> : <EyeOff size={14} />}
-          {showMarkers ? "マーカー表示中" : "マーカー非表示"}
+          {showMarkers ? "マーカー表示中" : "非表示"}
         </button>
+
         <span className="text-gray-300">|</span>
-        <span className="flex items-center gap-1">
+
+        {/* ズームコントロール */}
+        <div className="flex items-center gap-1">
+          <button
+            className="p-1 rounded hover:bg-gray-100 text-gray-600 hover:text-primary disabled:opacity-30"
+            onClick={() => setZoom(z => Math.min(4, +(z * 1.3).toFixed(2)))}
+            disabled={zoom >= 4}
+            title="拡大"
+          >
+            <ZoomIn size={15} />
+          </button>
+          <span className="w-10 text-center font-mono text-gray-600 text-xs">
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            className="p-1 rounded hover:bg-gray-100 text-gray-600 hover:text-primary disabled:opacity-30"
+            onClick={() => setZoom(z => Math.max(0.3, +(z / 1.3).toFixed(2)))}
+            disabled={zoom <= 0.3}
+            title="縮小"
+          >
+            <ZoomOut size={15} />
+          </button>
+          <button
+            className="px-1.5 py-0.5 rounded hover:bg-gray-100 text-gray-500 text-xs"
+            onClick={() => setZoom(1)}
+            title="等倍に戻す"
+          >
+            1:1
+          </button>
+        </div>
+
+        <span className="text-gray-300">|</span>
+
+        {/* 元に戻すボタン */}
+        <button
+          className="flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 text-gray-600 hover:text-primary disabled:opacity-30"
+          onClick={undo}
+          disabled={history.length === 0}
+          title="1つ前の操作に戻る"
+        >
+          <RotateCcw size={13} />
+          元に戻す
+          {history.length > 0 && (
+            <span className="ml-0.5 text-gray-400">({history.length})</span>
+          )}
+        </button>
+
+        <span className="text-gray-300 hidden sm:block">|</span>
+        <span className="hidden sm:flex items-center gap-1">
           <span className="inline-block w-3 h-3 rounded-full border-2 border-red-500 bg-red-100" />
           AI不確定（クリックで除去）
         </span>
-        <span className="text-gray-300">|</span>
-        <span>図面をクリック → 記号を手動追加</span>
+        <span className="hidden sm:block text-gray-300">|</span>
+        <span className="hidden sm:block">クリック → 手動追加</span>
       </div>
 
-      {/* SVG 図面 */}
+      {/* SVG 図面（スクロール対応ズームラッパー） */}
       <div className="border border-gray-200 rounded-xl overflow-hidden bg-gray-50">
-        <svg
-          ref={svgRef}
-          viewBox={`0 0 ${vw} ${vh}`}
-          preserveAspectRatio="xMidYMid meet"
-          className="w-full cursor-crosshair"
-          style={{ maxHeight: "70vh" }}
-          onClick={onSvgClick}
-        >
-          <image
-            href={`data:image/jpeg;base64,${pageImage}`}
-            x={0} y={0} width={vw} height={vh}
-          />
+        <div style={{ overflow: "auto", maxHeight: "70vh" }}>
+          <svg
+            ref={svgRef}
+            viewBox={`0 0 ${vw} ${vh}`}
+            preserveAspectRatio="xMidYMid meet"
+            style={{
+              width: `${zoom * 100}%`,
+              minWidth: `${zoom * 100}%`,
+              display: "block",
+              cursor: "crosshair",
+            }}
+            onClick={onSvgClick}
+          >
+            <image
+              href={`data:image/jpeg;base64,${pageImage}`}
+              x={0} y={0} width={vw} height={vh}
+            />
 
-          {/* 検出記号マーカー（色付き・番号付き） */}
-          {showMarkers && numberedSymbols.map((sym, i) => {
-            const color = codeColors[sym.symbol_code] ?? "#666";
-            return (
-              <g key={i} data-marker="detected">
-                <circle
-                  cx={sym.x} cy={sym.y} r={R}
-                  fill={`${color}30`}
-                  stroke={color}
-                  strokeWidth={Math.max(1.5, R * 0.14)}
-                />
-                <text
-                  x={sym.x} y={sym.y + FS * 0.38}
-                  textAnchor="middle"
-                  fontSize={FS}
-                  fill={color}
-                  fontWeight="800"
-                  style={{ userSelect: "none" }}
-                >
-                  {sym.n}
-                </text>
-                <title>{sym.symbol_code}（{LABELS[sym.symbol_code] ?? ""}）#{sym.n}</title>
+            {/* 検出記号マーカー（色付き・同種ごとに連番） */}
+            {showMarkers && numberedSymbols.map((sym, i) => {
+              const color = codeColors[sym.symbol_code] ?? "#666";
+              return (
+                <g key={i} data-marker="detected">
+                  <circle
+                    cx={sym.x} cy={sym.y} r={R}
+                    fill={`${color}30`}
+                    stroke={color}
+                    strokeWidth={Math.max(1.5, R * 0.14)}
+                  />
+                  <text
+                    x={sym.x} y={sym.y + FS * 0.38}
+                    textAnchor="middle"
+                    fontSize={FS}
+                    fill={color}
+                    fontWeight="800"
+                    style={{ userSelect: "none" }}
+                  >
+                    {sym.n}
+                  </text>
+                  <title>{sym.symbol_code}（{LABELS[sym.symbol_code] ?? ""}）#{sym.n}</title>
+                </g>
+              );
+            })}
+
+            {/* AI不確定マーカー（赤点線・クリックで除去） */}
+            {uncertain.map((u) => (
+              <g
+                key={u.id}
+                data-marker="uncertain"
+                style={{ cursor: "pointer" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  pushHistory();
+                  setUncertain((p) => p.filter((x) => x.id !== u.id));
+                }}
+              >
+                <circle cx={u.x} cy={u.y} r={R + 2} fill="rgba(239,68,68,0.15)" stroke="#ef4444" strokeWidth={2} strokeDasharray="4 2" />
+                <text x={u.x} y={u.y + FS * 0.38} textAnchor="middle" fontSize={FS + 1} fill="#ef4444" fontWeight="800" style={{ userSelect: "none" }}>?</text>
+                <title>{u.reason || "判断に迷った箇所 — クリックで除去"}</title>
               </g>
-            );
-          })}
+            ))}
 
-          {/* AI不確定マーカー（赤丸・クリックで除去） */}
-          {uncertain.map((u) => (
-            <g
-              key={u.id}
-              data-marker="uncertain"
-              style={{ cursor: "pointer" }}
-              onClick={(e) => { e.stopPropagation(); setUncertain((p) => p.filter((x) => x.id !== u.id)); }}
-            >
-              <circle cx={u.x} cy={u.y} r={R + 2} fill="rgba(239,68,68,0.15)" stroke="#ef4444" strokeWidth={2} strokeDasharray="4 2" />
-              <text x={u.x} y={u.y + FS * 0.38} textAnchor="middle" fontSize={FS + 1} fill="#ef4444" fontWeight="800" style={{ userSelect: "none" }}>?</text>
-              <title>{u.reason || "判断に迷った箇所 — クリックで除去"}</title>
-            </g>
-          ))}
-
-          {/* 手動追加予定マーカー（青点線） */}
-          {pendingMark && (
-            <g data-marker="pending">
-              <circle cx={pendingMark.svgX} cy={pendingMark.svgY} r={R + 2} fill="rgba(59,130,246,0.15)" stroke="#3b82f6" strokeWidth={2} strokeDasharray="5 3" />
-              <text x={pendingMark.svgX} y={pendingMark.svgY + FS * 0.38} textAnchor="middle" fontSize={FS + 1} fill="#3b82f6" fontWeight="800" style={{ userSelect: "none" }}>+</text>
-            </g>
-          )}
-        </svg>
+            {/* 手動追加予定マーカー（青点線） */}
+            {pendingMark && (
+              <g data-marker="pending">
+                <circle cx={pendingMark.svgX} cy={pendingMark.svgY} r={R + 2} fill="rgba(59,130,246,0.15)" stroke="#3b82f6" strokeWidth={2} strokeDasharray="5 3" />
+                <text x={pendingMark.svgX} y={pendingMark.svgY + FS * 0.38} textAnchor="middle" fontSize={FS + 1} fill="#3b82f6" fontWeight="800" style={{ userSelect: "none" }}>+</text>
+              </g>
+            )}
+          </svg>
+        </div>
       </div>
 
       {/* 手動追加パネル */}
@@ -231,7 +316,10 @@ export function DiagramViewer({
           </select>
           <button
             className="flex items-center gap-1 px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50"
-            onClick={() => addMut.mutate({ jobId, symbolCode: selectedCode, x: pendingMark.svgX, y: pendingMark.svgY })}
+            onClick={() => {
+              pushHistory();
+              addMut.mutate({ jobId, symbolCode: selectedCode, x: pendingMark.svgX, y: pendingMark.svgY });
+            }}
             disabled={addMut.isPending}
           >
             <Check size={13} />追加
