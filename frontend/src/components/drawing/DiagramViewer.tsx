@@ -153,8 +153,10 @@ export function DiagramViewer({
 
   const vw = imgWidth || 1600;
   const vh = imgHeight || 900;
-  const R = Math.max(10, Math.round(vw / 80));
-  const FS = Math.max(9, Math.round(R * 0.85));
+  // 記号を隠さないよう極小ドット（記号の1/6程度）
+  const R = Math.max(4, Math.round(vw / 280));
+  const badgeSz = Math.max(10, Math.round(vw / 110));
+  const FS = badgeSz;  // 凡例テキスト用
 
   return (
     <div className="space-y-2">
@@ -245,27 +247,27 @@ export function DiagramViewer({
               x={0} y={0} width={vw} height={vh}
             />
 
-            {/* 検出記号マーカー（カラーリング＋右上バッジ、記号を隠さない） */}
+            {/* 検出記号マーカー（極小ドット＋番号バッジ、記号を隠さない） */}
             {showMarkers && numberedSymbols.map((sym, i) => {
               const color = codeColors[sym.symbol_code] ?? "#666";
-              const badgeR = Math.max(9, Math.round(R * 0.55));
-              const bx = sym.x + R * 0.68;
-              const by = sym.y - R * 0.68;
+              const bx = sym.x;
+              const by = sym.y - R - badgeSz - 1;
               return (
                 <g key={i} data-marker="detected">
-                  {/* 半透明カラーリング（記号の上に薄く色付け） */}
-                  <circle
-                    cx={sym.x} cy={sym.y} r={R}
-                    fill={`${color}22`}
-                    stroke={color}
-                    strokeWidth={Math.max(2, R * 0.1)}
+                  {/* 記号中心の極小ドット */}
+                  <circle cx={sym.x} cy={sym.y} r={R} fill={color} opacity={0.75} />
+                  {/* 引き出し線 */}
+                  <line
+                    x1={sym.x} y1={sym.y - R}
+                    x2={bx} y2={by + badgeSz}
+                    stroke={color} strokeWidth={1} opacity={0.5}
                   />
-                  {/* 番号バッジ（右上に配置して記号中心を隠さない） */}
-                  <circle cx={bx} cy={by} r={badgeR} fill={color} />
+                  {/* 番号バッジ（真上に配置） */}
+                  <circle cx={bx} cy={by} r={badgeSz} fill={color} />
                   <text
-                    x={bx} y={by + badgeR * 0.42}
+                    x={bx} y={by + badgeSz * 0.42}
                     textAnchor="middle"
-                    fontSize={badgeR * 1.25}
+                    fontSize={badgeSz * 1.2}
                     fill="white"
                     fontWeight="900"
                     style={{ userSelect: "none" }}
@@ -289,8 +291,8 @@ export function DiagramViewer({
                   setUncertain((p) => p.filter((x) => x.id !== u.id));
                 }}
               >
-                <circle cx={u.x} cy={u.y} r={R + 2} fill="rgba(239,68,68,0.15)" stroke="#ef4444" strokeWidth={2} strokeDasharray="4 2" />
-                <text x={u.x} y={u.y + FS * 0.38} textAnchor="middle" fontSize={FS + 1} fill="#ef4444" fontWeight="800" style={{ userSelect: "none" }}>?</text>
+                <circle cx={u.x} cy={u.y} r={badgeSz + 2} fill="rgba(239,68,68,0.15)" stroke="#ef4444" strokeWidth={1.5} strokeDasharray="4 2" />
+                <text x={u.x} y={u.y + badgeSz * 0.42} textAnchor="middle" fontSize={badgeSz * 1.1} fill="#ef4444" fontWeight="800" style={{ userSelect: "none" }}>?</text>
                 <title>{u.reason || "判断に迷った箇所 — クリックで除去"}</title>
               </g>
             ))}
