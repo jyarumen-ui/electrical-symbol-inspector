@@ -256,8 +256,8 @@ def _safe_counts(raw: dict[str, Any]) -> dict[str, int]:
 
 # ── 記号位置検出（Pass 4） ────────────────────────────────────────────────────────
 
-_LOCATE_COLS = 12
-_LOCATE_ROWS = 8
+_LOCATE_TILE = 300   # px — 小タイル分割サイズ
+_LOCATE_MAX_TILES = 30  # タイル上限（API呼び出し数の上限）
 
 
 def _locate_symbols(
@@ -266,72 +266,53 @@ def _locate_symbols(
     merged_counts: dict[str, int],
 ) -> list[dict[str, Any]]:
     """
-    グリッドセル方式で記号位置を推定。
-    画像を COLS×ROWS のマス目に分け「どのマスにあるか」を Claude に答えさせる。
-    直接ピクセル座標を聞くよりはるかに精度が高い。
+    小タイル方式で記号位置を確定する。
+    画像を 300px タイルに分割し各タイルに何個あるかを聞く。
+    Claude に座標を直接推測させるより大幅に精度が高い。
     """
     if not merged_counts:
         return []
 
-    img_tmp = Image.open(io.BytesIO(display_bytes))
-    dw, dh = img_tmp.size
-    cell_w = dw / _LOCATE_COLS
-    cell_h = dh / _LOCATE_ROWS
+    img = Image.open(io.BytesIO(display_bytes))
+    dw, dh = img.size
 
-    expected = "\n".join(
-        f"- {code}（{LABELS.get(code, code)}）: {n}個"
-        for code, n in sorted(merged_counts.items())
-    )
+    # タイル生成
+    tiles: list[tuple[bytes, int, int, int, int]] = []
+    for y0 in range(0, dh, _LOCATE_TILE):
+        for x0 in range(0, dw, _LOCATE_TILE):
+            tw = min(_LOCATE_TILE, dw - x0)
+            th = min(_LOCATE_TILE, dh - y0)
+            tile = img.crop((x0, y0, x0 + tw, y0 + th))
+            buf = io.BytesIO()
+            tile.convert("RGB").save(buf, format="JPEG", quality=85)
+            tiles.append((buf.getvalue(), x0, y0, tw, th))
 
-    prompt = f"""この電気設備図面を横{_LOCATE_COLS}列×縦{_LOCATE_ROWS}行のグリッドに分割しました。
-列番号: 左から 1〜{_LOCATE_COLS}（左端=列1、右端=列{_LOCATE_COLS}）
-行番号: 上から 1〜{_LOCATE_ROWS}（上端=行1、下端=行{_LOCATE_ROWS}）
+    if len(tiles) > _LOCATE_MAX_TILES:
+        logger.warning("Too many tiles (%d), skipping locate", len(tiles))
+        return []
 
-以下の各電気記号が「どの列・どの行のマス」にあるかを答えてください。
-同じ記号が複数あれば全インスタンスを含めること。
-凡例・タイトル欄の記号は除く。
+    logger.info("Locate: %d tiles (%dx%d image, %dpx tile)", len(tiles), dw, dh, _LOCATE_TILE)
 
-## 記号リスト
-{expected}
-
-## 出力（JSONのみ・説明文不要）
-記号コードをキー、[列番号,行番号]のリストを値:
-{{"SW-1P":[[2,1],[5,3]],"RCPT-2P":[[7,4],[9,2]]}}
-"""
-
-    r = _call(client, display_bytes, prompt, max_tokens=2048)
     located: list[dict[str, Any]] = []
 
-    # 同セルに複数シンボルが集まった場合のオフセット管理
-    cell_counts: dict[tuple[int, int], int] = {}
+    # タイルごとにカウントを取得し、タイル中心付近にマーカーを配置
+    for tile_bytes, x0, y0, tw, th in tiles:
+        r = _call(client, tile_bytes, TILE_PROMPT, max_tokens=256)
+        tile_counts = _safe_counts(r)
 
-    for code, cells in r.items():
-        if not isinstance(cells, list):
-            continue
-        for cell in cells:
-            try:
-                if isinstance(cell, (list, tuple)) and len(cell) >= 2:
-                    col = max(1.0, min(float(_LOCATE_COLS), float(cell[0])))
-                    row = max(1.0, min(float(_LOCATE_ROWS), float(cell[1])))
-                else:
-                    continue
-            except (TypeError, ValueError):
+        for code, n in tile_counts.items():
+            if code not in merged_counts or n == 0:
                 continue
+            # タイル内に n 個を均等配置
+            for i in range(n):
+                cols = 3
+                col = i % cols
+                row = i // cols
+                x = x0 + tw * (0.2 + col * 0.3)
+                y = y0 + th * (0.25 + row * 0.5)
+                located.append({"symbol_code": str(code), "x": x, "y": y})
 
-            key = (round(col), round(row))
-            idx = cell_counts.get(key, 0)
-            cell_counts[key] = idx + 1
-
-            # セル中心 + 同セル内インデックスで少しずらす
-            base_x = (col - 0.5) * cell_w
-            base_y = (row - 0.5) * cell_h
-            offset = idx * (cell_w * 0.2)
-            x = base_x + (offset % cell_w) - cell_w * 0.1
-            y = base_y + (int(offset / cell_w) * cell_h * 0.2)
-
-            located.append({"symbol_code": str(code), "x": x, "y": y})
-
-    logger.info("Locate grid(%dx%d): %d positions", _LOCATE_COLS, _LOCATE_ROWS, len(located))
+    logger.info("Locate by tile: %d positions", len(located))
     return located
 
 
