@@ -1,8 +1,9 @@
 import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
-import { Zap, Database } from "lucide-react";
+import { Zap, Database, Trophy } from "lucide-react";
 import { DashboardPage } from "./pages/DashboardPage";
 import { JobPage } from "./pages/JobPage";
 import { MasterItemsPage } from "./pages/MasterItemsPage";
+import { SoccerFormationPage } from "./pages/SoccerFormationPage";
 
 function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -17,6 +18,10 @@ function Layout({ children }: { children: React.ReactNode }) {
             <Link to="/master-items" className="flex items-center gap-1 text-sm text-white/80 hover:text-white transition-colors">
               <Database size={15} />
               単価マスター
+            </Link>
+            <Link to="/soccer" className="flex items-center gap-1 text-sm text-white/80 hover:text-white transition-colors">
+              <Trophy size={15} />
+              フォーメーション
             </Link>
           </nav>
         </div>
@@ -38,6 +43,7 @@ export default function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/jobs/:jobId" element={<JobPage />} />
           <Route path="/master-items" element={<MasterItemsPage />} />
+          <Route path="/soccer" element={<SoccerFormationPage />} />
         </Routes>
       </Layout>
     </BrowserRouter>
